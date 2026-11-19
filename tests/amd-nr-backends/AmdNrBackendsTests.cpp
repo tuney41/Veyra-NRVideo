@@ -19,7 +19,6 @@
 #include <iostream>
 #include <string>
 
-using Microsoft::WRL::ComPtr;
 using namespace veyra::engine;
 using namespace veyra::pipeline;
 

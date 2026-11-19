@@ -1,0 +1,200 @@
+name: Build AMD NR Open-Source Runtimes (Mochizuki + RedDuke)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mochizuki-core:
+    name: Build Mochizuki dlssnr_core.dll (MIT, v0.0.9)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install MinGW-w64 cross-compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+
+      - name: Clone Mochizuki DLSSNR-AMD (MIT, v0.0.9) and pinned MIT/Apache deps
+        run: |
+          git clone --depth 1 --branch v0.0.9 https://gitlab.com/mochizuki0323/DLSSNR-AMD.git dlssnr-amd
+          cd dlssnr-amd
+
+          mkdir -p toolchain artifacts/ref
+          git init -q toolchain/Vulkan-Headers
+          git -C toolchain/Vulkan-Headers fetch -q --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git e3b1eec08173d6b825cd3ac88c885a63b621504a
+          git -C toolchain/Vulkan-Headers checkout -q FETCH_HEAD
+
+          git init -q artifacts/ref/DLSS5-Feeder
+          git -C artifacts/ref/DLSS5-Feeder fetch -q --depth 1 https://github.com/jlrouzies-fr/DLSS5-Feeder.git 76a08db83652617cfe4192eeecf9e46bfc008382
+          git -C artifacts/ref/DLSS5-Feeder checkout -q FETCH_HEAD
+
+      - name: Build headless dlssnr_core.dll (no DXGI overlay / no OptiScaler memory patching)
+        run: |
+          set -euo pipefail
+          cd dlssnr-amd
+          out="$(pwd)/artifacts/windows/veyra-core"
+          mkdir -p "$out"
+
+          python3 windows/build/generate_device_chain.py toolchain/Vulkan-Headers "$out/nr_device_chain_sizes.hpp"
+
+          cat > "$out/nr_headless_stubs.cpp" <<'CPP'
+          #include "nr_pe_menu.hpp"
+          #include "nr_pe_optifix.hpp"
+
+          namespace nr::pe {
+          void fix_optiscaler() {}
+          }  // namespace nr::pe
+
+          namespace nr::pe::menu {
+          void install() {}
+          void set_extra_diagnostics(void (*)()) {}
+          void set_extra_network(void (*)()) {}
+          void watch_queues(ID3D12Device*) {}
+          void on_d3d12_present(D3D12PresentHook) {}
+          void on_d3d12_shown(D3D12ShownHook) {}
+          void note_swapchain_queue(IDXGISwapChain*, ID3D12CommandQueue*) {}
+          void on_d3d11_present(D3D11PresentHook) {}
+          void on_execute(ExecuteObserver) {}
+          void draw_game(IDXGISwapChain*, IUnknown*, bool) {}
+          bool colour_space_of(IDXGISwapChain*, int*) { return false; }
+          void abandon_at_exit() {}
+          const VkPresentInfoKHR* vulkan_present(
+              VkInstance, VkPhysicalDevice, VkDevice, VkQueue, uint32_t,
+              VkSwapchainKHR, VkFormat, VkColorSpaceKHR, VkExtent2D,
+              const std::vector<VkImage>&, const VkPresentInfoKHR* info) {
+              return info;
+          }
+          void vulkan_forget(VkDevice, VkSwapchainKHR) {}
+          }  // namespace nr::pe::menu
+          CPP
+
+          cxx=x86_64-w64-mingw32-g++
+          cc=x86_64-w64-mingw32-gcc
+          objdump=x86_64-w64-mingw32-objdump
+          minhook=artifacts/ref/DLSS5-Feeder/external/minhook
+          stamp=$(NR_VERSION=0.0.9-veyra bash windows/build/version.sh)
+          source windows/build/arch/rdna4.sh
+
+          common=(
+            -std=c++17 -O2 -DNDEBUG
+            -DNR_BUILD_STAMP="\"$stamp\""
+            -DNR_INT4=1
+            -Itoolchain/Vulkan-Headers/include
+            -Iwindows/src
+            -Iwindows/src/core
+            -Iwindows/src/pe
+            -I"$out"
+          )
+
+          "$cxx" "${common[@]}" "${NR_PRODUCT_DEFINES[@]}" -c windows/src/core/nr_runtime.cpp -o "$out/nr_runtime.o"
+
+          plain_cpps=(
+            windows/src/core/nr_native_plan.cpp
+            windows/src/core/nr_renodx.cpp
+            windows/src/core/nr_wilsjo2.cpp
+            windows/src/pe/nr_pe_log.cpp
+            windows/src/pe/nr_pe_crash.cpp
+            windows/src/pe/nr_pe_interop.cpp
+            windows/src/pe/nr_vram_ledger.cpp
+            windows/src/pe/nr_pe_session.cpp
+            windows/src/pe/nr_pe_bridge.cpp
+            windows/src/pe/nr_pe_d3d12split.cpp
+            windows/src/pe/nr_pe_config.cpp
+            windows/src/pe/nr_dlssnr_model.cpp
+            windows/src/pe/nr_pe_renodx_route.cpp
+            windows/src/pe/nr_screenshot.cpp
+            windows/src/pe/nr_ngx_core.cpp
+            windows/src/pe/nr_d3d12_passthrough.cpp
+            windows/src/pe/nr_d3d12_passthrough_backend.cpp
+            windows/src/pe/nr_d3d12_passthrough_net.cpp
+            windows/src/pe/nr_renodx_d3d12.cpp
+            "$out/nr_headless_stubs.cpp"
+          )
+
+          pids=()
+          for src in "${plain_cpps[@]}"; do
+            base=$(basename "$src" .cpp)
+            "$cxx" "${common[@]}" -c "$src" -o "$out/${base}.o" &
+            pids+=($!)
+          done
+
+          "$cxx" "${common[@]}" -I"$minhook/include" -c windows/src/pe/nr_pe_vkdevice.cpp -o "$out/nr_pe_vkdevice.o" &
+          pids+=($!)
+          "$cxx" "${common[@]}" -I"$minhook/include" -c windows/src/pe/nr_pe_control.cpp -o "$out/nr_pe_control.o" &
+          pids+=($!)
+
+          for unit in hook buffer trampoline; do
+            "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/$unit.c" -o "$out/mh_$unit.o" &
+            pids+=($!)
+          done
+          "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/hde/hde64.c" -o "$out/mh_hde.o" &
+          pids+=($!)
+
+          for pid in "${pids[@]}"; do
+            wait "$pid"
+          done
+
+          objs=("$out"/*.o)
+          ldflags=(-ld3d12 -ld3d11 -ldxgi -lole32 -lversion -luuid -static -static-libgcc -static-libstdc++)
+
+          bash windows/build/vulkan_lazy.sh "$out" "$cxx" -shared "${objs[@]}" "${ldflags[@]}"
+          "$cxx" -shared -o "$out/dlssnr_core.dll" "${objs[@]}" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" "${ldflags[@]}"
+
+          ls -lh "$out/dlssnr_core.dll"
+          exports=$("$objdump" -p "$out/dlssnr_core.dll" | grep -o '\bNVSDK_NGX_D3D12_[A-Za-z0-9_]*' | sort -u)
+          echo "Exported NGX D3D12 symbols:"
+          echo "$exports"
+          for req in \
+            NVSDK_NGX_D3D12_Init_Ext \
+            NVSDK_NGX_D3D12_Init \
+            NVSDK_NGX_D3D12_GetCapabilityParameters \
+            NVSDK_NGX_D3D12_AllocateParameters \
+            NVSDK_NGX_D3D12_DestroyParameters \
+            NVSDK_NGX_D3D12_CreateFeature \
+            NVSDK_NGX_D3D12_EvaluateFeature \
+            NVSDK_NGX_D3D12_ReleaseFeature \
+            NVSDK_NGX_D3D12_Shutdown1; do
+            echo "$exports" | grep -qx "$req" || { echo "MISSING EXPORT: $req" >&2; exit 1; }
+          done
+
+          mkdir -p "$out/dist"
+          cp "$out/dlssnr_core.dll" "$out/dist/dlssnr_core.dll"
+          cp LICENSE "$out/dist/LICENSE"
+
+      - name: Upload Mochizuki dlssnr_core.dll artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mochizuki-dlssnr-core
+          path: dlssnr-amd/artifacts/windows/veyra-core/dist
+          if-no-files-found: error
+
+  build-redduke-worker:
+    name: Build RedDuke RX 9000/7000 veyra_amd_nr_worker.exe
+    runs-on: windows-2022
+    steps:
+      - name: Checkout Veyra fork
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC x64 developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Fetch and patch pinned RedDuke MIT network layer
+        shell: pwsh
+        run: |
+          python -X utf8 -B scripts/amd-nr/prepare-rdna3-source.py --out out/rdna3-src
+
+      - name: Compile veyra_amd_nr_worker.exe (RX 7000 + RX 9000 unlocked)
+        shell: cmd
+        run: |
+          mkdir out\dist
+          cl.exe /nologo /std:c++20 /O2 /MD /EHsc /utf-8 /WX- /DNOMINMAX /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /Iinclude /Iout\rdna3-src\prepared src\pipeline\Rdna3NrWorker.cpp out\rdna3-src\prepared\runtime\core\network.cpp /Fo:out\ /Fe:out\dist\veyra_amd_nr_worker.exe /link kernel32.lib user32.lib advapi32.lib ole32.lib d3d12.lib dxgi.lib dxguid.lib version.lib
+          copy out\rdna3-src\prepared\LICENSE out\dist\LICENSE
+          dir out\dist
+
+      - name: Upload RedDuke worker artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: redduke-rx9000-worker
+          path: out/dist
+          if-no-files-found: error

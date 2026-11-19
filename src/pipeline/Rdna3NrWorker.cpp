@@ -100,6 +100,12 @@ struct Worker {
         DXGI_ADAPTER_DESC1 desc{};adapter->GetDesc1(&desc);
 #ifndef VEYRA_RDNA3_CONTRACT_WORKER
         if(!veyra::pipeline::amdAdapterSupportsRedDuke(desc.VendorId,desc.Description)){error="this worker requires a supported AMD RX 7000 or RX 9000 adapter";return false;}
+        if(veyra::pipeline::amdAdapterIsRx9000(desc.VendorId,desc.Description)){
+            // Packaged zluda2.db ships gfx11 targets while the native .hsaco kernels
+            // already include gfx1200/gfx1201; allow one-time ZLUDA translation of
+            // remaining kernels into the local ComputeCache on RX 9000.
+            SetEnvironmentVariableW(L"DLSS5NR_ALLOW_TRANSLATION",L"1");
+        }
         // HIP SDK installs may set HIP_PATH without changing global PATH. Load
         // the actual HIP7 library absolutely in this worker only.
         wchar_t system[MAX_PATH]{},sdk[32768]{};GetSystemDirectoryW(system,MAX_PATH);

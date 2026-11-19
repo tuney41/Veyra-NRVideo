@@ -17,7 +17,7 @@ permissions:
 jobs:
   build-windows-amd-portable:
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,36 +31,49 @@ jobs:
           modules: 'qtshadertools'
           cache: true
 
-      - name: Fetch public SDK headers (DLSS, NVOF, AMD AMF, AMD FidelityFX 2.x)
+      - name: Fetch public SDK headers (DLSS, NVOF, NVENC, AMD AMF, AMD FidelityFX 2.x)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path deps/nvof/NvOFInterface, deps/nvof/Common/NvOFBase | Out-Null
           git clone --depth 1 https://github.com/NVIDIA/DLSS.git deps/dlss
           git clone --depth 1 https://github.com/jp7677/dxvk-nvapi.git deps/dxvk-nvapi
           Copy-Item 'deps/dxvk-nvapi/inc/nvofapi/*.h' 'deps/nvof/NvOFInterface/'
+          git clone --depth 1 --branch n13.0.19.0 https://github.com/FFmpeg/nv-codec-headers.git deps/nv-codec-headers
           git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git deps/amf
           git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git deps/fidelityfx2
 
-      - name: Cache vcpkg FFmpeg build
-        id: cache-vcpkg
-        uses: actions/cache@v4
-        with:
-          path: vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-ffmpeg-${{ hashFiles('vcpkg.json') }}
-
-      - name: Install FFmpeg via vcpkg
-        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
+      - name: Download prebuilt FFmpeg 9.0 Windows x64 shared-dev SDK
         shell: pwsh
         run: |
-          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe'
-          & $vcpkg install --triplet x64-windows --x-manifest-root=. --x-install-root=vcpkg_installed
+          New-Item -ItemType Directory -Force -Path deps/ffmpeg-dl | Out-Null
+          $zip = 'deps/ffmpeg-dl/ffmpeg-9.0.zip'
+          Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath 'deps/ffmpeg-dl' -Force
+          $extracted = Get-ChildItem -Path 'deps/ffmpeg-dl' -Directory | Select-Object -First 1
+          Move-Item -Path $extracted.FullName -Destination 'deps/ffmpeg'
+          New-Item -ItemType Directory -Force -Path 'deps/ffmpeg/share/ffmpeg' | Out-Null
+          @'
+          get_filename_component(_ffmpeg_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+          set(FFMPEG_FOUND TRUE)
+          set(FFMPEG_INCLUDE_DIRS "${_ffmpeg_root}/include")
+          set(FFMPEG_LIBRARY_DIRS "${_ffmpeg_root}/lib")
+          set(FFMPEG_LIBRARIES
+            "${_ffmpeg_root}/lib/avformat.lib"
+            "${_ffmpeg_root}/lib/avcodec.lib"
+            "${_ffmpeg_root}/lib/avfilter.lib"
+            "${_ffmpeg_root}/lib/swresample.lib"
+            "${_ffmpeg_root}/lib/swscale.lib"
+            "${_ffmpeg_root}/lib/avutil.lib"
+          )
+          '@ | Set-Content -Path 'deps/ffmpeg/share/ffmpeg/FindFFMPEG.cmake' -Encoding utf8
 
       - name: Configure Veyra (Windows 11 x64, AMD RX 9070 XT Multi-Backend)
         shell: pwsh
         run: |
-          $ffmpegRoot = (Resolve-Path 'vcpkg_installed/x64-windows').Path
+          $ffmpegRoot = (Resolve-Path 'deps/ffmpeg').Path
           $dlssRoot = (Resolve-Path 'deps/dlss').Path
           $nvofRoot = (Resolve-Path 'deps/nvof').Path
+          $nvencRoot = (Resolve-Path 'deps/nv-codec-headers').Path
           $amfRoot = (Resolve-Path 'deps/amf/amf/public').Path
           $ffx2Root = (Resolve-Path 'deps/fidelityfx2/Kits/FidelityFX').Path
           $label = if ('${{ github.event.inputs.display_version }}' -ne '') { '${{ github.event.inputs.display_version }}' } else { '2.1.9-amd-nr' }
@@ -70,15 +83,16 @@ jobs:
             -DVEYRA_ENABLE_EXPERIMENTAL_DLSSNR=ON `
             -DVEYRA_DLSS_SDK_ROOT="$dlssRoot" `
             -DVEYRA_NVOF_SDK_ROOT="$nvofRoot" `
+            -DVEYRA_NVENC_HEADERS_ROOT="$nvencRoot" `
             -DVEYRA_AMF_SDK_ROOT="$amfRoot" `
             -DVEYRA_FIDELITYFX2_ROOT="$ffx2Root" `
             -DVEYRA_FFMPEG_ROOT="$ffmpegRoot" `
-            -DVEYRA_ENABLE_DEINTERLACE=OFF `
+            -DVEYRA_ENABLE_DEINTERLACE=ON `
             -DVEYRA_ENABLE_LIBDOVI=OFF `
             -DVEYRA_ENABLE_D3D12_DEBUG=OFF
 
       - name: Build veyra_qml_ui and shaders
-        run: cmake --build out/build --config Release --target veyra_qml_ui veyra_amd_nr_test_worker --parallel 2
+        run: cmake --build out/build --config Release --target veyra_qml_ui veyra_amd_nr_test_worker --parallel 4
 
       - name: Stage portable AMD package
         shell: pwsh
@@ -98,7 +112,7 @@ jobs:
             Copy-Item 'out/build/shaders/*.dxil' "$stage/shaders/" -ErrorAction SilentlyContinue
           }
           Copy-Item -Recurse 'qml' "$stage/qml"
-          Copy-Item 'vcpkg_installed/x64-windows/bin/*.dll' "$stage/" -ErrorAction SilentlyContinue
+          Copy-Item 'deps/ffmpeg/bin/*.dll' "$stage/" -ErrorAction SilentlyContinue
           if (Test-Path 'deps/fidelityfx2/Kits/FidelityFX/signedbin') {
             Copy-Item 'deps/fidelityfx2/Kits/FidelityFX/signedbin/*.dll' "$stage/runtime_local/amd/fidelityfx/" -ErrorAction SilentlyContinue
           }

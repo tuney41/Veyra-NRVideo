@@ -99,7 +99,7 @@ struct Worker {
            hrFailed(__LINE__,D3D12CreateDevice(adapter.Get(),D3D_FEATURE_LEVEL_12_0,IID_PPV_ARGS(&device)))){error="selected D3D12 adapter LUID is unavailable";return false;}
         DXGI_ADAPTER_DESC1 desc{};adapter->GetDesc1(&desc);
 #ifndef VEYRA_RDNA3_CONTRACT_WORKER
-        if(veyra::pipeline::amdNrProvider(desc.VendorId,desc.Description)!=veyra::pipeline::AmdNrProvider::RedDukeRdna3){error="this worker requires the selected AMD RX7000 adapter";return false;}
+        if(!veyra::pipeline::amdAdapterSupportsRedDuke(desc.VendorId,desc.Description)){error="this worker requires a supported AMD RX 7000 or RX 9000 adapter";return false;}
         // HIP SDK installs may set HIP_PATH without changing global PATH. Load
         // the actual HIP7 library absolutely in this worker only.
         wchar_t system[MAX_PATH]{},sdk[32768]{};GetSystemDirectoryW(system,MAX_PATH);

@@ -431,6 +431,7 @@ add_library(veyra_pipeline STATIC
   src/pipeline/AmdHipPreflight.cpp
   src/pipeline/LmxxfNrBackend.cpp
   src/pipeline/Rdna3NrBackend.cpp
+  src/pipeline/AmdNgxNrBackend.cpp
   src/pipeline/VfgBackend.cpp
   src/pipeline/VfgAmpereCompat.cpp
   src/pipeline/VfxSrBackend.cpp

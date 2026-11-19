@@ -7,9 +7,21 @@ namespace veyra::pipeline {
 // Same-frame linear input/output contract shared by independent AMD providers.
 class AmdNrBackend {
 public:
+    struct FrameControls {
+        float intensity = 1.0f;
+        float localTone = 1.0f;
+        float localStructure = 1.0f;
+        float skinStructure = -1.0f;
+        int32_t style = 0;
+        int32_t autoMask = 0;
+        int32_t uiCorrection = 1;
+        ID3D12Resource* motion = nullptr;
+        ID3D12Resource* depth = nullptr;
+    };
     virtual ~AmdNrBackend()=default;
     virtual bool ready()const=0;
     virtual bool admits(uint32_t,uint32_t)const=0;
+    virtual void setFrameControls(const FrameControls&){}
     virtual bool recordInputs(ID3D12GraphicsCommandList*,ID3D12Resource*,uint64_t,bool,float)=0;
     virtual bool enqueue()=0;
     virtual bool recordOutputs(ID3D12GraphicsCommandList*,ID3D12Resource*)=0;

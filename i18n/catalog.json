@@ -25492,6 +25492,62 @@
    "en": "This video has no danmaku",
    "ja": "この動画には弾幕がありません",
    "ko": "이 동영상에는 탄막이 없습니다"
+  },
+  {
+   "zh": "开启使用 CC_SMALL_FP8；关闭使用 CC_SILVER_AARDWOLD，并同步写入 dlssnr-amd.ini。每层独立选择，切换会重建 NR。",
+   "src": "qml/NrLayerEditor.qml",
+   "zh-TW": "開啟使用 CC_SMALL_FP8；關閉使用 CC_SILVER_AARDWOLD，並同步寫入 dlssnr-amd.ini。每層獨立選擇，切換會重建 NR。",
+   "en": "On uses CC_SMALL_FP8; off uses CC_SILVER_AARDWOLD and syncs dlssnr-amd.ini. Saved per layer; switching rebuilds NR.",
+   "ja": "オンで CC_SMALL_FP8、オフで CC_SILVER_AARDWOLD を使用し dlssnr-amd.ini に同期します。レイヤーごとに保存され、切替時に NR を再構築します。",
+   "ko": "켜면 CC_SMALL_FP8, 끄면 CC_SILVER_AARDWOLD를 사용하며 dlssnr-amd.ini에 동기화합니다. 레이어별로 저장되며 전환 시 NR을 다시 구성합니다."
+  },
+  {
+   "zh": "开启使用 CC 性能模型（需 310.9.16+）；关闭使用 HT 原模型。每层独立选择，切换会重建 NR。",
+   "src": "qml/NrLayerEditor.qml",
+   "zh-TW": "開啟使用 CC 效能模型（需 310.9.16+）；關閉使用 HT 原模型。每層獨立選擇，切換會重建 NR。",
+   "en": "On uses the CC performance model (requires 310.9.16+); off uses the original HT model. Saved per layer; switching rebuilds NR.",
+   "ja": "オンで CC パフォーマンスモデル（310.9.16+ が必要）、オフで元の HT モデルを使用します。レイヤーごとに保存され、切替時に NR を再構築します。",
+   "ko": "켜면 CC 성능 모델(310.9.16+ 필요), 끄면 원본 HT 모델을 사용합니다. 레이어별로 저장되며 전환 시 NR을 다시 구성합니다."
+  },
+  {
+   "zh": "AMD NGX NR（支持最高 4K 与全部 6 项模型参数）：支持 Veyra 画面与 Windows 11 游戏叠加层。原生 HDR 保留基底，通过 SDR 代理增强后还原。",
+   "src": "qml/NrLayerEditor.qml",
+   "zh-TW": "AMD NGX NR（支援最高 4K 與全部 6 項模型參數）：支援 Veyra 畫面與 Windows 11 遊戲疊加層。原生 HDR 保留基底，透過 SDR 代理增強後還原。",
+   "en": "AMD NGX NR (supports up to 4K and all 6 model parameters): works in Veyra and the Windows 11 Game Mode overlay. Native HDR keeps its base via SDR-linear proxy restoration.",
+   "ja": "AMD NGX NR（最大 4K および全 6 種のモデルパラメータ対応）：Veyra 画面と Windows 11 ゲームオーバーレイに対応。ネイティブ HDR は SDR プロキシ経由で復元します。",
+   "ko": "AMD NGX NR(최대 4K 및 6가지 모델 매개변수 전체 지원): Veyra 화면과 Windows 11 게임 오버레이를 지원합니다. 네이티브 HDR은 SDR 프록시로 보정 후 복원합니다."
+  },
+  {
+   "zh": "未找到 Mochizuki DLSSNR-AMD 组件（请将 dlssnr_core.dll 放入 runtime_local/amd-nr-mochizuki）",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "未找到 Mochizuki DLSSNR-AMD 元件（請將 dlssnr_core.dll 放入 runtime_local/amd-nr-mochizuki）",
+   "en": "Mochizuki DLSSNR-AMD runtime not found (place dlssnr_core.dll in runtime_local/amd-nr-mochizuki)",
+   "ja": "Mochizuki DLSSNR-AMD ランタイムが見つかりません（dlssnr_core.dll を runtime_local/amd-nr-mochizuki に配置してください）",
+   "ko": "Mochizuki DLSSNR-AMD 런타임을 찾을 수 없습니다 (dlssnr_core.dll을 runtime_local/amd-nr-mochizuki에 배치하세요)"
+  },
+  {
+   "zh": "未找到 RedDuke AMD NR 组件（runtime_local/amd-nr-rdna3）",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "未找到 RedDuke AMD NR 元件（runtime_local/amd-nr-rdna3）",
+   "en": "RedDuke AMD NR runtime not found (runtime_local/amd-nr-rdna3)",
+   "ja": "RedDuke AMD NR ランタイムが見つかりません（runtime_local/amd-nr-rdna3）",
+   "ko": "RedDuke AMD NR 런타임을 찾을 수 없습니다 (runtime_local/amd-nr-rdna3)"
+  },
+  {
+   "zh": "需要 AMD RX 6000 / 7000 / 9000",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "需要 AMD RX 6000 / 7000 / 9000",
+   "en": "Requires AMD RX 6000 / 7000 / 9000",
+   "ja": "AMD RX 6000 / 7000 / 9000 が必要です",
+   "ko": "AMD RX 6000 / 7000 / 9000 GPU가 필요합니다"
+  },
+  {
+   "zh": "未找到本地 DLSS-NR-on-AMD (NeuralHub) 运行组件（需用户自行安装并配置路径）",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "未找到本機 DLSS-NR-on-AMD (NeuralHub) 執行元件（需使用者自行安裝並設定路徑）",
+   "en": "Local DLSS-NR-on-AMD (NeuralHub) runtime not found (install locally and configure path)",
+   "ja": "ローカルの DLSS-NR-on-AMD (NeuralHub) ランタイムが見つかりません（各自インストールしてパスを設定してください）",
+   "ko": "로컬 DLSS-NR-on-AMD (NeuralHub) 런타임을 찾을 수 없습니다 (직접 설치 후 경로를 설정하세요)"
   }
  ]
 }

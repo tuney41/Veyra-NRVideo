@@ -8,6 +8,7 @@
 // views are created last. Per-frame execution uses the shared command slot
 // ring (NR evaluates on a fresh list - snippet constraint).
 #include "veyra/pipeline/EnhanceGraph.h"
+#include "veyra/pipeline/AmdNgxNrBackend.h"
 #include "veyra/pipeline/Rdna3NrBackend.h"
 #include "veyra/pipeline/AmdNrProvider.h"
 #include "veyra/pipeline/VfgBackend.h"
@@ -768,7 +769,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     if(!desc.videoHdr.valid()||(desc.hdrOutput&&!desc.hdrInput&&!desc.convertVideoHdr())){veyra::log::error("hdr","HDR output requires native HDR input or explicit Video HDR conversion");return false;}
     const bool videoRestore=!desc.stillImage&&desc.videoSrQuality>=1&&desc.videoSrQuality<=4;
     srEnabled_ = desc.enableSr && (srcW_ != workW_ || srcH_ != workH_ || videoRestore || srPrescaleActive() || srResolveActive());
-    lmxxfNr_ = context_.adapter().vendorId == 0x1002 || desc.nrRuntime == engine::NrRuntime::LmxxfAmd;
+    lmxxfNr_ = context_.adapter().vendorId == 0x1002 || engine::isAmdNrRuntime(engine::currentNrRuntime(desc.nrRuntime));
     if(context_.adapter().vendorId==0x1002 && desc_.opticalFlowBackend==engine::OpticalFlowBackend::Nvidia)
         desc_.opticalFlowBackend=engine::OpticalFlowBackend::AmdFidelityFx;
     nrEnabled_ = desc.enableNr && !desc.noFeatures && (!desc.noNgx || lmxxfNr_);
@@ -1811,7 +1812,18 @@ bool EnhanceGraph::initNgxFeatures()
                 // restores its delta over the untouched HDR base before the
                 // same shared residual/protection/temporal composite.
                 if(desc_.hdrWorking()&&!instance->createAmdHdrProxy(context_.device()))return false;
-                if(amdNrProvider(context_.adapter().vendorId,context_.adapter().description)==AmdNrProvider::RedDukeRdna3){
+                const auto runtimeChoice=engine::currentNrRuntime(desc_.nrRuntime);
+                if(runtimeChoice==engine::NrRuntime::MochizukiAmd||runtimeChoice==engine::NrRuntime::DlssNrOnAmd){
+                    auto backend=std::make_unique<AmdNgxNrBackend>();
+                    const auto kind=runtimeChoice==engine::NrRuntime::MochizukiAmd
+                        ? AmdNgxNrProviderKind::Mochizuki
+                        : AmdNgxNrProviderKind::NeuralHub;
+                    if(!backend->open(std::filesystem::path(desc_.runtimeAbsPath),context_.device(),ring_.queue(),
+                                      context_.adapter().vendorId,extent.width,extent.height,instance->model.performance,kind))return false;
+                    instance->amd=std::move(backend);
+                }else if(runtimeChoice==engine::NrRuntime::RedDukeAmd||
+                         (runtimeChoice==engine::NrRuntime::LmxxfAmd&&
+                          amdNrProvider(context_.adapter().vendorId,context_.adapter().description)==AmdNrProvider::RedDukeRdna3)){
                     auto backend=std::make_unique<Rdna3NrBackend>();
                     const auto directory=std::filesystem::path(desc_.runtimeAbsPath)/L".."/L"amd-nr-rdna3";
                     if(!backend->open(directory.lexically_normal(),context_.device(),ring_.queue(),extent.width,extent.height,instance->model.performance))return false;
@@ -3912,6 +3924,23 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
                     list->Dispatch((nrW+15)/16,(nrH+15)/16,1);
                     tracker_.uavBarrier(list,layer->amdHdrProxy());
                     tracker_.transition(list,layer->amdHdrProxy(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                }
+                if(engine::amdNrSupportsFullControls(engine::currentNrRuntime(desc_.nrRuntime))){
+                    auto* motionTex=haveFlow&&desc_.nrUsesFlow()?layer->motion():layer->zeroMotion();
+                    auto* depthTex=layer->zeroDepth();
+                    if(motionTex)tracker_.transition(list,motionTex,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    if(depthTex)tracker_.transition(list,depthTex,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    AmdNrBackend::FrameControls fc{};
+                    fc.intensity=layer->model.intensity;
+                    fc.localTone=layer->model.tone;
+                    fc.localStructure=layer->model.structure;
+                    fc.skinStructure=layer->model.skin;
+                    fc.style=layer->model.style;
+                    fc.autoMask=layer->model.autoMask;
+                    fc.uiCorrection=layer->model.uiCorrection;
+                    fc.motion=motionTex;
+                    fc.depth=depthTex;
+                    layer->amd->setFrameControls(fc);
                 }
                 if(!layer->amd->recordInputs(list,hdr?layer->amdHdrProxy():layer->input(),realFrameIndex_+1,reset||!layer->historyValid||layer->inputRevision!=1,layer->model.intensity))return false;
                 // Same direct queue, producer -> HIP handoff -> consumer. No

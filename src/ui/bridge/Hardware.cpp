@@ -1,5 +1,6 @@
 // QML bridge: Hardware responsibilities.
 #include "../QmlPlayerBridge_p.h"
+#include "veyra/pipeline/AmdNgxNrBackend.h"
 #include "veyra/pipeline/Rdna3NrBackend.h"
 #include "veyra/pipeline/AmdNrProvider.h"
 #include "veyra/pipeline/VfxSrBackend.h"
@@ -65,8 +66,9 @@ ui::EffectGpu effectGpu() {
     result.blackwell = name.contains("RTX 50", Qt::CaseInsensitive) || name.contains("Blackwell", Qt::CaseInsensitive);
     result.ada = name.contains("RTX 40", Qt::CaseInsensitive) || name.contains("Ada", Qt::CaseInsensitive);
     result.ampere = name.contains("GeForce RTX 30", Qt::CaseInsensitive);
-    result.rx9000 = name.contains("RX 90", Qt::CaseInsensitive);
-    result.rx7000 = pipeline::amdNrProvider(d->VendorId,d->Description)==pipeline::AmdNrProvider::RedDukeRdna3;
+    result.rx9000 = pipeline::amdAdapterIsRx9000(d->VendorId,d->Description);
+    result.rx7000 = pipeline::amdAdapterIsRx7000(d->VendorId,d->Description);
+    result.rx6000 = pipeline::amdAdapterIsRx6000(d->VendorId,d->Description);
     return result;
 }
 
@@ -98,6 +100,30 @@ static QVariantMap scanEffectCapabilities() {
     if (hipMissing) {
         auto cap = out.value("nr4").toMap();
         if (cap.value("available").toBool()) { cap["available"] = false; cap["reason"] = QObject::tr("需要 AMD HIP 7 驱动运行组件"); out["nr4"] = cap; }
+    }
+    const bool mochizukiFiles = pipeline::AmdNgxNrBackend::runtimeAvailable(nr, pipeline::AmdNgxNrProviderKind::Mochizuki);
+    add("nr5", H::AmdNrMochizuki, mochizukiFiles, QObject::tr("需要 AMD RX 7000 / 9000"));
+    if (ui::hardwareSupports(H::AmdNrMochizuki, gpu) && !mochizukiFiles) {
+        auto cap = out.value("nr5").toMap();
+        cap["reason"] = QObject::tr("未找到 Mochizuki DLSSNR-AMD 组件（请将 dlssnr_core.dll 放入 runtime_local/amd-nr-mochizuki）");
+        out["nr5"] = cap;
+    }
+    const bool redDukeFiles = pipeline::Rdna3NrBackend::runtimeAvailable(rdna3Directory);
+    add("nr6", H::AmdNrRedDuke, redDukeFiles, QObject::tr("需要 AMD RX 7000 / 9000"));
+    if (ui::hardwareSupports(H::AmdNrRedDuke, gpu) && !redDukeFiles) {
+        auto cap = out.value("nr6").toMap();
+        cap["reason"] = QObject::tr("未找到 RedDuke AMD NR 组件（runtime_local/amd-nr-rdna3）");
+        out["nr6"] = cap;
+    } else if (ui::hardwareSupports(H::AmdNrRedDuke, gpu) && !pipeline::Rdna3NrBackend::hipRuntimeAvailable()) {
+        auto cap = out.value("nr6").toMap();
+        if (cap.value("available").toBool()) { cap["available"] = false; cap["reason"] = QObject::tr("需要 AMD HIP 7 驱动运行组件"); out["nr6"] = cap; }
+    }
+    const bool neuralHubFiles = pipeline::AmdNgxNrBackend::runtimeAvailable(nr, pipeline::AmdNgxNrProviderKind::NeuralHub);
+    add("nr7", H::AmdNrNeuralHub, neuralHubFiles, QObject::tr("需要 AMD RX 6000 / 7000 / 9000"));
+    if (ui::hardwareSupports(H::AmdNrNeuralHub, gpu) && !neuralHubFiles) {
+        auto cap = out.value("nr7").toMap();
+        cap["reason"] = QObject::tr("未找到本地 DLSS-NR-on-AMD (NeuralHub) 运行组件（需用户自行安装并配置路径）");
+        out["nr7"] = cap;
     }
     add("sr0", H::Nvidia, exists(nr / "nvngx_dlss.dll"), QObject::tr("需要 NVIDIA RTX 显卡"));
     for (int i = 1; i <= 4; ++i) add("sr" + QString::number(i), H::Nvidia, exists(nr / "nvngx_vsr.dll"), QObject::tr("需要 NVIDIA RTX 显卡"));
@@ -233,7 +259,13 @@ QVariantMap QmlPlayerBridge::effectAvailability(const QString& id) const {
 QVariantList QmlPlayerBridge::nrRuntimeChoices() const {
     QVariantList choices;
     const auto caps = effectCapabilities();
-    for (const auto& entry : std::initializer_list<std::pair<int, QString>>{{2, "RTX 20–50 · SF 310.9.16"}, {3, tr("RTX 50 · NVIDIA 原版")}, {4, effectGpu().rx7000?tr("RX 7000 · RedDuke（实验）"):tr("RX 9000 · lmxxf（实验）")}}) {
+    for (const auto& entry : std::initializer_list<std::pair<int, QString>>{
+             {2, "RTX 20–50 · SF 310.9.16"},
+             {3, tr("RTX 50 · NVIDIA 原版")},
+             {4, effectGpu().rx7000 ? tr("RX 7000 · RedDuke（实验）") : tr("RX 9000 · lmxxf（实验）")},
+             {5, tr("RX 9000 / 7000 · Mochizuki DLSSNR-AMD（Vulkan ACO / D3D12）")},
+             {6, tr("RX 9000 / 7000 · RedDuke（ZLUDA / HIP）")},
+             {7, tr("RX 9000 / 7000 / 6000 · DLSS-NR-on-AMD（NeuralHub）")}}) {
         const auto cap = caps.value("nr" + QString::number(entry.first)).toMap();
         choices << QVariantMap{{"id", QString::number(entry.first)}, {"label", entry.second}, {"disabled", !cap.value("available").toBool()}, {"note", cap.value("reason")}};
     }

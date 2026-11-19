@@ -100,7 +100,8 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         // their selected backend and fail clearly when that backend is unavailable.
         const bool nvidiaFeatures=nvidiaAdapter;
         const bool amdAdapter=ctx.adapter().vendorId==0x1002;
-        const bool amdNrExport=amdAdapter&&currentNrRuntime(options.settings.nrRuntime)==NrRuntime::LmxxfAmd;
+        const auto activeNrRuntime=currentNrRuntime(options.settings.nrRuntime);
+        const bool amdNrExport=amdAdapter&&isAmdNrRuntime(activeNrRuntime);
         if(options.nr&&!nvidiaFeatures&&!amdNrExport){failureReason=L"当前设备不能执行所选 NR，请选择此显卡可用的 NR 运行库";break;}
         // One description for the whole job: the stage rules (which SR runs,
         // whether NR/FG are available) come from the same place the preview uses.
@@ -115,8 +116,9 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         // Video SR restores video even though ResolutionPlan has no enlargement.
         const bool srAvailable=gd.enableSr;
         if(options.nr&&amdNrExport){
-            fgNote=L"AMD NR 使用内部最高 1080p 处理，保留原尺寸合成与导出";
-            veyra::log::info("export-nr",std::format("runtime=lmxxf source={}x{} output={}x{} internal={}x{} layers={}",info.width,info.height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.nrLayersExtent.size()));
+            if(amdNrBoundedTo1080p(activeNrRuntime))
+                fgNote=L"AMD NR 使用内部最高 1080p 处理，保留原尺寸合成与导出";
+            veyra::log::info("export-nr",std::format("runtime={} source={}x{} output={}x{} internal={}x{} layers={}",nrRuntimeName(activeNrRuntime),info.width,info.height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.nrLayersExtent.size()));
         }else if(options.nr&&gd.enableNr){
             // NR follows the preview size preset; its residual is composed at output size.
             veyra::log::info("export-nr",std::format("source={}x{} output={}x{} internal={}x{} layers={}",info.width,info.height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.nrLayersExtent.size()));

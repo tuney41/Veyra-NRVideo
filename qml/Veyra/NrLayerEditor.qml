@@ -37,11 +37,19 @@ ColumnLayout {
     signal duplicateRequested(int nodeIndex)
     signal removeRequested(int nodeIndex)
     signal orderEdited(bool enabled)
-    readonly property bool amdNr: layerData.runtime === 4
-    readonly property string amdRuntimeLabel: {
+    readonly property bool amdNr: layerData.runtime === 4 || layerData.runtime === 5 || layerData.runtime === 6 || layerData.runtime === 7
+    readonly property bool amdBoundedNr: layerData.runtime === 4 || layerData.runtime === 6
+    readonly property bool amdFullControlNr: layerData.runtime === 5 || layerData.runtime === 7
+    readonly property string selectedRuntimeLabel: {
         const choices = veyra.nrRuntimeChoices || []
-        const choice = choices.find(entry => String(entry.id) === "4")
-        return choice ? choice.label : qsTr("RX 7000 / 9000 · AMD NR（实验）")
+        const choice = choices.find(entry => String(entry.id) === String(layerData.runtime))
+        if (choice) return choice.label
+        if (layerData.runtime === 5) return qsTr("RX 9000 / 7000 · Mochizuki DLSSNR-AMD（Vulkan ACO / D3D12）")
+        if (layerData.runtime === 6) return qsTr("RX 9000 / 7000 · RedDuke（ZLUDA / HIP）")
+        if (layerData.runtime === 7) return qsTr("RX 9000 / 7000 / 6000 · DLSS-NR-on-AMD（NeuralHub）")
+        if (layerData.runtime === 4) return qsTr("RX 7000 / 9000 · AMD NR（实验）")
+        if (layerData.runtime === 3) return qsTr("RTX 50 · NVIDIA 原版")
+        return "RTX 20–50 · SF 310.9.16"
     }
     property string autoReason: ""
     readonly property bool manualSize: layerData.manualSize ?? false
@@ -64,7 +72,7 @@ ColumnLayout {
     }
     readonly property var sizeChoices: [
         {id:"2",label:"480p"}, {id:"3",label:"720p"}, {id:"4",label:"900p"},
-        {id:"0",label:qsTr("1080p · 默认")}, {id:"5",label:"1440p",disabled:amdNr,note:amdNr ? qsTr("AMD NR 最高 1080p 像素预算") : ""}, {id:"1",label:qsTr("原生"),disabled:amdNr,note:amdNr ? qsTr("AMD NR 最高 1080p 像素预算") : ""},
+        {id:"0",label:qsTr("1080p · 默认")}, {id:"5",label:"1440p",disabled:amdBoundedNr,note:amdBoundedNr ? qsTr("AMD NR 最高 1080p 像素预算") : ""}, {id:"1",label:qsTr("原生"),disabled:amdBoundedNr,note:amdBoundedNr ? qsTr("AMD NR 最高 1080p 像素预算") : ""},
         {id:"6",label:qsTr("自动（按负载）"),disabled:autoReason.length>0,note:autoReason},
         {id:"manual",label:qsTr("手动")}
     ]
@@ -114,18 +122,28 @@ ColumnLayout {
         hint: qsTr("全链共享 · 切换会重建 NR 管线")
         VSelect {
             objectName: "nr-runtime"
-            value: editor.layerData.runtime === 4 ? editor.amdRuntimeLabel
-                   : editor.layerData.runtime === 3 ? qsTr("RTX 50 · NVIDIA 原版")
-                   : "RTX 20–50 · SF 310.9.16"
-            options: veyra.nrRuntimeChoices || [{id:"2",label:"RTX 20–50 · SF 310.9.16"},{id:"3",label:qsTr("RTX 50 · NVIDIA 原版")},{id:"4",label:qsTr("RX 7000 / 9000 · AMD NR（实验）")}]
+            value: editor.selectedRuntimeLabel
+            options: veyra.nrRuntimeChoices || [
+                {id:"2",label:"RTX 20–50 · SF 310.9.16"},
+                {id:"3",label:qsTr("RTX 50 · NVIDIA 原版")},
+                {id:"4",label:qsTr("RX 7000 / 9000 · AMD NR（实验）")},
+                {id:"5",label:qsTr("RX 9000 / 7000 · Mochizuki DLSSNR-AMD（Vulkan ACO / D3D12）")},
+                {id:"6",label:qsTr("RX 9000 / 7000 · RedDuke（ZLUDA / HIP）")},
+                {id:"7",label:qsTr("RX 9000 / 7000 / 6000 · DLSS-NR-on-AMD（NeuralHub）")}
+            ]
             onPicked: id => editor.edited(editor.layerData.index, "runtime", Number(id))
         }
     }
     VRow {
         objectName: "nr-performance-row"
         label: qsTr("启用性能优化版")
-        hint: editor.amdNr ? qsTr("开启使用 Small 模型；关闭使用原模型。每层独立选择，切换会重建 NR，画面可能有所不同。")
-                           : qsTr("开启使用新版模型 B；关闭使用旧版模型 A。切换会重建 NR，画面可能有所不同。")
+        hint: editor.layerData.runtime === 5
+              ? qsTr("开启使用 CC_SMALL_FP8；关闭使用 CC_SILVER_AARDWOLD，并同步写入 dlssnr-amd.ini。每层独立选择，切换会重建 NR。")
+              : editor.layerData.runtime === 7
+              ? qsTr("开启使用 CC 性能模型（需 310.9.16+）；关闭使用 HT 原模型。每层独立选择，切换会重建 NR。")
+              : editor.amdNr
+              ? qsTr("开启使用 Small 模型；关闭使用原模型。每层独立选择，切换会重建 NR，画面可能有所不同。")
+              : qsTr("开启使用新版模型 B；关闭使用旧版模型 A。切换会重建 NR，画面可能有所不同。")
         enabled: (editor.layerData.runtime === 2 || editor.amdNr) && Support.available(veyra, "nr" + editor.layerData.runtime)
         opacity: enabled ? 1 : 0.4
         VSwitch {
@@ -181,8 +199,8 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         visible: editor.manualSize
-        text: editor.amdNr ? qsTr("手动比例以最高 1080p 预算内的输入为基准；适用于预览与视频导出，输出尺寸不变。")
-                          : qsTr("手动比例缩放该层输入的宽高；50% 约为四分之一像素。适用于预览与视频导出，输出尺寸不变。")
+        text: editor.amdBoundedNr ? qsTr("手动比例以最高 1080p 预算内的输入为基准；适用于预览与视频导出，输出尺寸不变。")
+                                  : qsTr("手动比例缩放该层输入的宽高；50% 约为四分之一像素。适用于预览与视频导出，输出尺寸不变。")
         color: Theme.t3; font.family: Theme.fontUi; font.pixelSize: 11
         wrapMode: Text.WordWrap
     }
@@ -196,14 +214,14 @@ ColumnLayout {
     }
     Text {
         Layout.fillWidth: true
-        text: editor.amdNr ? qsTr("AMD NR 预览与视频导出最高按内部 1080p 处理，视频保持输出尺寸；图片导出仍需符合模型尺寸预算。")
-                          : qsTr("预览与视频导出都按所选内部分辨率处理，保留比例且不放大小输入，输出尺寸不变；图片导出仍完整处理。")
+        text: editor.amdBoundedNr ? qsTr("AMD NR 预览与视频导出最高按内部 1080p 处理，视频保持输出尺寸；图片导出仍需符合模型尺寸预算。")
+                                  : qsTr("预览与视频导出都按所选内部分辨率处理，保留比例且不放大小输入，输出尺寸不变；图片导出仍完整处理。")
         color: Theme.t3; font.family: Theme.fontUi; font.pixelSize: 11
         wrapMode: Text.WordWrap
     }
     Text {
         Layout.fillWidth: true
-        visible: !editor.amdNr && editor.layerCount > 1 &&
+        visible: !editor.amdBoundedNr && editor.layerCount > 1 &&
                  (!editor.listControls || (veyra.nrLayers.length > 0 && editor.layerData.index === veyra.nrLayers[0].index))
         text: qsTr("多层 NR 可尝试前层 720p、末层 1080p；三层可尝试 480p / 720p / 1080p。降低前层分辨率会改变画面，视频导出同样按各层所选分辨率处理。")
         color: Theme.t3; font.family: Theme.fontUi; font.pixelSize: 11
@@ -219,12 +237,14 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         visible: editor.amdNr || !Support.available(veyra, "nr" + editor.layerData.runtime)
-        text: !Support.available(veyra, "nr" + editor.layerData.runtime) ? Support.reason(veyra, "nr" + editor.layerData.runtime) : qsTr("AMD NR（实验）：RX 7000 / 9000 使用各自运行组件，需要 HIP 7 驱动。性能模式使用 Small，关闭使用原模型；内部最高 1080p 像素预算，支持百分比尺寸。7000 系风格固定默认，9000 系沿用运行时配置。原生 HDR 保留基底，通过 SDR 代理增强后还原。7000 系仍需实卡验收。")
+        text: !Support.available(veyra, "nr" + editor.layerData.runtime) ? Support.reason(veyra, "nr" + editor.layerData.runtime)
+              : editor.amdFullControlNr ? qsTr("AMD NGX NR（支持最高 4K 与全部 6 项模型参数）：支持 Veyra 画面与 Windows 11 游戏叠加层。原生 HDR 保留基底，通过 SDR 代理增强后还原。")
+              : qsTr("AMD NR（实验）：RX 7000 / 9000 使用各自运行组件，需要 HIP 7 驱动。性能模式使用 Small，关闭使用原模型；内部最高 1080p 像素预算，支持百分比尺寸。7000 系风格固定默认，9000 系沿用运行时配置。原生 HDR 保留基底，通过 SDR 代理增强后还原。7000 系仍需实卡验收。")
         color: Theme.t3; font.pixelSize: 11; wrapMode: Text.WordWrap
     }
     VSubGroup {
         objectName: "nr-model-group"
-        enabled: !editor.amdNr && Support.available(veyra, "nr" + editor.layerData.runtime)
+        enabled: (!editor.amdNr || editor.amdFullControlNr) && Support.available(veyra, "nr" + editor.layerData.runtime)
         opacity: enabled ? 1 : 0.4
         Layout.fillWidth: true
         label: qsTr("模型参数"); count: 6

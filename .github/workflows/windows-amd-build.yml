@@ -1,0 +1,95 @@
+name: Windows AMD RX 9070 XT Portable Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      display_version:
+        description: 'Display version label stamped on the build'
+        required: false
+        default: '2.1.9-amd-nr'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-amd-portable:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Qt 6.8.3 (MSVC 2022 x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Cache vcpkg FFmpeg build
+        id: cache-vcpkg
+        uses: actions/cache@v4
+        with:
+          path: vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-ffmpeg-${{ hashFiles('vcpkg.json') }}
+
+      - name: Install FFmpeg via vcpkg
+        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe'
+          & $vcpkg install --triplet x64-windows --x-manifest-root=. --x-install-root=vcpkg_installed
+
+      - name: Configure Veyra (Windows 11 x64, AMD-ready)
+        shell: pwsh
+        run: |
+          $ffmpegRoot = (Resolve-Path 'vcpkg_installed/x64-windows').Path
+          $label = if ('${{ github.event.inputs.display_version }}' -ne '') { '${{ github.event.inputs.display_version }}' } else { '2.1.9-amd-nr' }
+          cmake -S . -B out/build -G "Visual Studio 17 2022" -A x64 `
+            -DVEYRA_DISPLAY_VERSION="$label" `
+            -DVEYRA_FFMPEG_ROOT="$ffmpegRoot" `
+            -DVEYRA_ENABLE_DEINTERLACE=OFF `
+            -DVEYRA_ENABLE_LIBDOVI=OFF `
+            -DVEYRA_ENABLE_D3D12_DEBUG=OFF
+
+      - name: Build veyra_qml_ui and AMD NR test worker
+        run: cmake --build out/build --config Release --target veyra_qml_ui veyra_amd_nr_test_worker --parallel 2
+
+      - name: Stage portable AMD package
+        shell: pwsh
+        run: |
+          $stage = 'out/Veyra-AMD-RX9070XT-win64-portable'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/shaders" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd-nr" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd-nr-mochizuki" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd-nr-rdna3" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd-nr-neuralhub" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/scripts/amd-nr" | Out-Null
+
+          Copy-Item 'out/build/Release/veyra_qml_ui.exe' "$stage/"
+          if (Test-Path 'out/build/shaders') {
+            Copy-Item 'out/build/shaders/*.dxil' "$stage/shaders/" -ErrorAction SilentlyContinue
+          }
+          Copy-Item 'vcpkg_installed/x64-windows/bin/*.dll' "$stage/" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse 'i18n' "$stage/i18n"
+          Copy-Item 'scripts/amd-nr/stage-mochizuki-runtime.py' "$stage/scripts/amd-nr/"
+          Copy-Item 'scripts/amd-nr/stage-neuralhub-runtime.py' "$stage/scripts/amd-nr/"
+          Copy-Item 'docs/AMD_RX9070XT_NR_BACKENDS.md' "$stage/"
+          Copy-Item 'LICENSE' "$stage/"
+
+          $windeployqt = Join-Path $env:Qt6_DIR 'bin/windeployqt.exe'
+          & $windeployqt --release --qmldir qml/Veyra "$stage/veyra_qml_ui.exe"
+
+          Compress-Archive -Path "$stage/*" -DestinationPath 'out/Veyra-AMD-RX9070XT-win64-portable.zip' -Force
+
+      - name: Upload portable AMD build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Veyra-AMD-RX9070XT-win64-portable
+          path: out/Veyra-AMD-RX9070XT-win64-portable.zip
+          retention-days: 30

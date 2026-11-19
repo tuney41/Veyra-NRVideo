@@ -1,0 +1,40 @@
+name: AMD RX 9070 XT NR Backend Checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amd-nr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-and-i18n-checks:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure standalone AMD NR backend tests (MSVC 2022 x64)
+        run: cmake -S tests/amd-nr-backends -B out/amd-nr-backends -G "Visual Studio 17 2022" -A x64
+
+      - name: Build FakeAmdNgxCore.dll and unit/ABI tests
+        run: cmake --build out/amd-nr-backends --config Release --parallel 2
+
+      - name: Run AMD NR backend, Feature 18 ABI, and hardware routing tests
+        run: ctest --test-dir out/amd-nr-backends -C Release --output-on-failure --timeout 120
+
+      - name: Check 5-language i18n catalog integrity
+        run: python -X utf8 -B scripts/i18n/extract.py --check
+
+      - name: Syntax-check AMD NR staging helper scripts
+        run: |
+          python -X utf8 -m py_compile scripts/amd-nr/stage-mochizuki-runtime.py
+          python -X utf8 -m py_compile scripts/amd-nr/stage-neuralhub-runtime.py

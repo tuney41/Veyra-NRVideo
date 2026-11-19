@@ -734,7 +734,16 @@ struct QmlPlayerBridge::Impl {
                 DXGI_ADAPTER_DESC1 desc{};
                 if(FAILED(adapter->GetDesc1(&desc))||(desc.Flags&DXGI_ADAPTER_FLAG_SOFTWARE))continue;
                 auto initial=facade.pendingSettings();
-                initial.nrRuntime=desc.VendorId==0x1002?engine::NrRuntime::LmxxfAmd:engine::NrRuntime::Ampere;
+                if(desc.VendorId==0x1002){
+                    const auto caps=currentEffectCapabilities();
+                    if(caps.value("nr5").toMap().value("available").toBool())initial.nrRuntime=engine::NrRuntime::MochizukiAmd;
+                    else if(caps.value("nr4").toMap().value("available").toBool())initial.nrRuntime=engine::NrRuntime::LmxxfAmd;
+                    else if(caps.value("nr6").toMap().value("available").toBool())initial.nrRuntime=engine::NrRuntime::RedDukeAmd;
+                    else if(caps.value("nr7").toMap().value("available").toBool())initial.nrRuntime=engine::NrRuntime::DlssNrOnAmd;
+                    else initial.nrRuntime=engine::NrRuntime::LmxxfAmd;
+                }else{
+                    initial.nrRuntime=engine::NrRuntime::Ampere;
+                }
                 if(desc.VendorId==0x1002||desc.VendorId==0x8086){
                     initial.opticalFlowBackend=engine::OpticalFlowBackend::AmdFidelityFx;
                     initial.videoSrQuality=engine::kVideoSrFsr;

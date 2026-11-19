@@ -140,11 +140,38 @@ constexpr std::wstring_view captureAudioIngressName(CaptureAudioIngress mode) {
     return L"自动（优先 PCM，必要时位流解码）";
 }
 // Keep retired 0/1 IDs decodable; new builds migrate them to the SF slot.
-// 3 remains the explicitly selected NVIDIA original, 4 the AMD backend.
-enum class NrRuntime { Original = 0, Community = 1, Ampere = 2, NvidiaOriginal = 3, LmxxfAmd = 4 };
+// 3 remains the explicitly selected NVIDIA original, 4 the AMD auto/lmxxf backend,
+// 5 Mochizuki DLSSNR-AMD (Vulkan ACO / native D3D12 NGX), 6 RedDukeDev (ZLUDA/HIP
+// unlocked for RX 9000 + RX 7000), 7 user-installed DLSS-NR-on-AMD (NeuralHub).
+enum class NrRuntime {
+    Original = 0,
+    Community = 1,
+    Ampere = 2,
+    NvidiaOriginal = 3,
+    LmxxfAmd = 4,
+    MochizukiAmd = 5,
+    RedDukeAmd = 6,
+    DlssNrOnAmd = 7
+};
 constexpr bool validNrRuntime(NrRuntime runtime) {
     return runtime == NrRuntime::Original || runtime == NrRuntime::Community ||
-           runtime == NrRuntime::Ampere || runtime == NrRuntime::NvidiaOriginal || runtime == NrRuntime::LmxxfAmd;
+           runtime == NrRuntime::Ampere || runtime == NrRuntime::NvidiaOriginal ||
+           runtime == NrRuntime::LmxxfAmd || runtime == NrRuntime::MochizukiAmd ||
+           runtime == NrRuntime::RedDukeAmd || runtime == NrRuntime::DlssNrOnAmd;
+}
+constexpr bool isAmdNrRuntime(NrRuntime runtime) {
+    return runtime == NrRuntime::LmxxfAmd || runtime == NrRuntime::MochizukiAmd ||
+           runtime == NrRuntime::RedDukeAmd || runtime == NrRuntime::DlssNrOnAmd;
+}
+// lmxxf and RedDuke enforce a 1080p internal pixel budget; Mochizuki and
+// DLSS-NR-on-AMD support native 1440p / 4K internal inference.
+constexpr bool amdNrBoundedTo1080p(NrRuntime runtime) {
+    return runtime == NrRuntime::LmxxfAmd || runtime == NrRuntime::RedDukeAmd;
+}
+// NGX Feature 18 AMD runtimes consume all six model controls (tone, structure,
+// skin, style, autoMask) in addition to intensity.
+constexpr bool amdNrSupportsFullControls(NrRuntime runtime) {
+    return runtime == NrRuntime::MochizukiAmd || runtime == NrRuntime::DlssNrOnAmd;
 }
 // Lecram and the older RTX40 community DLL are no longer packaged. Explicit
 // NVIDIA-original and AMD choices survive migration; no DLL hash loading lock.
@@ -158,6 +185,9 @@ constexpr std::string_view nrRuntimeName(NrRuntime runtime) {
     case NrRuntime::Ampere:return "community-SF-RTX20-RTX50";
     case NrRuntime::NvidiaOriginal:return "NVIDIA-original-RTX50-310.8.0";
     case NrRuntime::LmxxfAmd:return "AMD-NR-auto"; // persisted legacy ID4, RX7000/9000 providers route by actual adapter
+    case NrRuntime::MochizukiAmd:return "AMD-NR-Mochizuki-DLSSNR";
+    case NrRuntime::RedDukeAmd:return "AMD-NR-RedDuke";
+    case NrRuntime::DlssNrOnAmd:return "AMD-NR-NeuralHub";
     }
     return "unknown";
 }
@@ -204,12 +234,16 @@ struct NrSettings {
     bool operator==(const NrSettings&) const = default;
 };
 // Create-time I32 contract, verified against both embedded models in the
-// user-provided 310.9.16 runtime. Original/AMD keep their previous parameters.
+// user-provided 310.9.16 runtime. Original keeps preset 0; SF and NGX-based AMD
+// runtimes (Mochizuki / NeuralHub) map performance to preset 2 (Small/CC) vs 1 (Original/HT).
 constexpr int32_t nrRenderPreset(NrRuntime runtime,const NrSettings& model) {
-    return currentNrRuntime(runtime)==NrRuntime::Ampere ? (model.performance?2:1) : 0;
+    const auto active = currentNrRuntime(runtime);
+    return (active == NrRuntime::Ampere || active == NrRuntime::MochizukiAmd || active == NrRuntime::DlssNrOnAmd)
+        ? (model.performance ? 2 : 1) : 0;
 }
 constexpr bool nrUsesPerformanceModel(NrRuntime runtime) {
-    return currentNrRuntime(runtime)==NrRuntime::Ampere || runtime==NrRuntime::LmxxfAmd;
+    const auto active = currentNrRuntime(runtime);
+    return active == NrRuntime::Ampere || isAmdNrRuntime(active);
 }
 constexpr int32_t nrModelSelection(NrRuntime runtime,const NrSettings& model) {
     return nrUsesPerformanceModel(runtime) ? (model.performance?2:1) : 0;

@@ -15,7 +15,7 @@ constexpr pipeline::NrSizePolicy exportNrSizePolicy(NrRuntime runtime,pipeline::
     // budget BEFORE multiplying, just as the preview does.
     if(!pipeline::validNrSizePolicy(preset)||pipeline::manualNrSizePolicy(preset))return preset;
     if(preset==pipeline::NrSizePolicy::Auto)preset=pipeline::NrSizePolicy::P1440;
-    if(currentNrRuntime(runtime)==NrRuntime::LmxxfAmd){
+    if(amdNrBoundedTo1080p(currentNrRuntime(runtime))){
         const auto limit=pipeline::nrHeightLimit(preset);
         if(limit==0||limit>1080)return pipeline::NrSizePolicy::Realtime;
     }
@@ -23,7 +23,7 @@ constexpr pipeline::NrSizePolicy exportNrSizePolicy(NrRuntime runtime,pipeline::
 }
 inline pipeline::Extent exportNrProcessingExtent(pipeline::Extent input,NrRuntime runtime,pipeline::NrSizePolicy preset){
     return pipeline::ResolutionPlan::make(input,false,exportNrSizePolicy(runtime,preset),false,0,
-        pipeline::SrTarget::Uhd4K,false,currentNrRuntime(runtime)==NrRuntime::LmxxfAmd?1080u:0u).nr;
+        pipeline::SrTarget::Uhd4K,false,amdNrBoundedTo1080p(currentNrRuntime(runtime))?1080u:0u).nr;
 }
 inline EnhancementSettings freezeExportSettings(EnhancementSettings settings) {
     // Preserve invalid counts for the caller's validation; normalization must

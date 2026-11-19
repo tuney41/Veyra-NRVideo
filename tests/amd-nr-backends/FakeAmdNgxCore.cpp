@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Contract test fixture mimicking mochizuki0323/DLSSNR-AMD's dlssnr_core.dll
 // (17-slot MSVC-ABI NVSDK_NGX_Parameter vtable + Feature 18 entry points).
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <d3d12.h>
 

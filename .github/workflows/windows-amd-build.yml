@@ -28,7 +28,18 @@ jobs:
         with:
           version: '6.8.3'
           arch: 'win64_msvc2022_64'
+          modules: 'qtshadertools'
           cache: true
+
+      - name: Fetch public SDK headers (DLSS, NVOF, AMD AMF, AMD FidelityFX 2.x)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path deps/nvof/NvOFInterface, deps/nvof/Common/NvOFBase | Out-Null
+          git clone --depth 1 https://github.com/NVIDIA/DLSS.git deps/dlss
+          git clone --depth 1 https://github.com/jp7677/dxvk-nvapi.git deps/dxvk-nvapi
+          Copy-Item 'deps/dxvk-nvapi/inc/nvofapi/*.h' 'deps/nvof/NvOFInterface/'
+          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git deps/amf
+          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git deps/fidelityfx2
 
       - name: Cache vcpkg FFmpeg build
         id: cache-vcpkg
@@ -44,19 +55,29 @@ jobs:
           $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe'
           & $vcpkg install --triplet x64-windows --x-manifest-root=. --x-install-root=vcpkg_installed
 
-      - name: Configure Veyra (Windows 11 x64, AMD-ready)
+      - name: Configure Veyra (Windows 11 x64, AMD RX 9070 XT Multi-Backend)
         shell: pwsh
         run: |
           $ffmpegRoot = (Resolve-Path 'vcpkg_installed/x64-windows').Path
+          $dlssRoot = (Resolve-Path 'deps/dlss').Path
+          $nvofRoot = (Resolve-Path 'deps/nvof').Path
+          $amfRoot = (Resolve-Path 'deps/amf/amf/public').Path
+          $ffx2Root = (Resolve-Path 'deps/fidelityfx2/Kits/FidelityFX').Path
           $label = if ('${{ github.event.inputs.display_version }}' -ne '') { '${{ github.event.inputs.display_version }}' } else { '2.1.9-amd-nr' }
           cmake -S . -B out/build -G "Visual Studio 17 2022" -A x64 `
             -DVEYRA_DISPLAY_VERSION="$label" `
+            -DVEYRA_BUILD_QML_UI=ON `
+            -DVEYRA_ENABLE_EXPERIMENTAL_DLSSNR=ON `
+            -DVEYRA_DLSS_SDK_ROOT="$dlssRoot" `
+            -DVEYRA_NVOF_SDK_ROOT="$nvofRoot" `
+            -DVEYRA_AMF_SDK_ROOT="$amfRoot" `
+            -DVEYRA_FIDELITYFX2_ROOT="$ffx2Root" `
             -DVEYRA_FFMPEG_ROOT="$ffmpegRoot" `
             -DVEYRA_ENABLE_DEINTERLACE=OFF `
             -DVEYRA_ENABLE_LIBDOVI=OFF `
             -DVEYRA_ENABLE_D3D12_DEBUG=OFF
 
-      - name: Build veyra_qml_ui and AMD NR test worker
+      - name: Build veyra_qml_ui and shaders
         run: cmake --build out/build --config Release --target veyra_qml_ui veyra_amd_nr_test_worker --parallel 2
 
       - name: Stage portable AMD package
@@ -69,13 +90,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd-nr-mochizuki" | Out-Null
           New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd-nr-rdna3" | Out-Null
           New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd-nr-neuralhub" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/runtime_local/amd/fidelityfx" | Out-Null
           New-Item -ItemType Directory -Force -Path "$stage/scripts/amd-nr" | Out-Null
 
           Copy-Item 'out/build/Release/veyra_qml_ui.exe' "$stage/"
           if (Test-Path 'out/build/shaders') {
             Copy-Item 'out/build/shaders/*.dxil' "$stage/shaders/" -ErrorAction SilentlyContinue
           }
+          Copy-Item -Recurse 'qml' "$stage/qml"
           Copy-Item 'vcpkg_installed/x64-windows/bin/*.dll' "$stage/" -ErrorAction SilentlyContinue
+          if (Test-Path 'deps/fidelityfx2/Kits/FidelityFX/signedbin') {
+            Copy-Item 'deps/fidelityfx2/Kits/FidelityFX/signedbin/*.dll' "$stage/runtime_local/amd/fidelityfx/" -ErrorAction SilentlyContinue
+          }
           Copy-Item -Recurse 'i18n' "$stage/i18n"
           Copy-Item 'scripts/amd-nr/stage-mochizuki-runtime.py' "$stage/scripts/amd-nr/"
           Copy-Item 'scripts/amd-nr/stage-neuralhub-runtime.py' "$stage/scripts/amd-nr/"

@@ -31,7 +31,7 @@ jobs:
           modules: 'qtshadertools'
           cache: true
 
-      - name: Fetch public SDK headers (DLSS, NVOF, NVENC, AMD AMF, AMD FidelityFX 2.x)
+      - name: Fetch public SDK headers (DLSS, NVOF, NVENC, AMD AMF, Intel XeSS, AMD FidelityFX 1.1.4 + 2.x)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path deps/nvof/NvOFInterface, deps/nvof/Common/NvOFBase | Out-Null
@@ -40,7 +40,23 @@ jobs:
           Copy-Item 'deps/dxvk-nvapi/inc/nvofapi/*.h' 'deps/nvof/NvOFInterface/'
           git clone --depth 1 --branch n13.0.19.0 https://github.com/FFmpeg/nv-codec-headers.git deps/nv-codec-headers
           git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git deps/amf
+          git clone --depth 1 https://github.com/intel/xess.git deps/xess
           git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git deps/fidelityfx2
+          git clone --depth 1 --branch v1.1.4 https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git deps/fidelityfx1
+
+      - name: Build AMD FidelityFX 1.1.4 Optical Flow static libraries (VEYRA_HAS_AMD_OF=1)
+        shell: pwsh
+        run: |
+          cmake -S deps/fidelityfx1/sdk -B deps/fidelityfx1/sdk/build -G "Visual Studio 17 2022" -A x64 `
+            -DFFX_API_BACKEND=DX12_X64 `
+            -DFFX_API_DX12=ON `
+            -DFFX_OF=ON `
+            -DFFX_AUTO_COMPILE_SHADERS=ON
+          cmake --build deps/fidelityfx1/sdk/build --config Release --target ffx_opticalflow_x64 ffx_backend_dx12_x64 --parallel 4
+          if (-not (Test-Path 'deps/fidelityfx1/sdk/bin/ffx_sdk/ffx_opticalflow_x64.lib') -or -not (Test-Path 'deps/fidelityfx1/sdk/bin/ffx_sdk/ffx_backend_dx12_x64.lib')) {
+            throw 'FidelityFX 1.1.4 opticalflow static libs were not produced!'
+          }
+          Get-Item 'deps/fidelityfx1/sdk/bin/ffx_sdk/*.lib' | Select-Object Name, Length
 
       - name: Download prebuilt FFmpeg 9.0 Windows x64 shared-dev SDK
         shell: pwsh
@@ -75,6 +91,8 @@ jobs:
           $nvofRoot = (Resolve-Path 'deps/nvof').Path
           $nvencRoot = (Resolve-Path 'deps/nv-codec-headers').Path
           $amfRoot = (Resolve-Path 'deps/amf/amf/public').Path
+          $xessRoot = (Resolve-Path 'deps/xess').Path
+          $ffx1Root = (Resolve-Path 'deps/fidelityfx1/sdk').Path
           $ffx2Root = (Resolve-Path 'deps/fidelityfx2/Kits/FidelityFX').Path
           $label = if ('${{ github.event.inputs.display_version }}' -ne '') { '${{ github.event.inputs.display_version }}' } else { '2.1.9-amd-nr' }
           cmake -S . -B out/build -G "Visual Studio 17 2022" -A x64 `
@@ -85,6 +103,8 @@ jobs:
             -DVEYRA_NVOF_SDK_ROOT="$nvofRoot" `
             -DVEYRA_NVENC_HEADERS_ROOT="$nvencRoot" `
             -DVEYRA_AMF_SDK_ROOT="$amfRoot" `
+            -DVEYRA_XESS_ROOT="$xessRoot" `
+            -DVEYRA_FIDELITYFX_ROOT="$ffx1Root" `
             -DVEYRA_FIDELITYFX2_ROOT="$ffx2Root" `
             -DVEYRA_FFMPEG_ROOT="$ffmpegRoot" `
             -DVEYRA_ENABLE_DEINTERLACE=ON `

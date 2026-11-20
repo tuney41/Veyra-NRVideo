@@ -48,6 +48,8 @@ jobs:
         shell: pwsh
         run: |
           cmake -S deps/fidelityfx1/sdk -B deps/fidelityfx1/sdk/build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
             -DFFX_API_BACKEND=DX12_X64 `
             -DFFX_API_DX12=ON `
             -DFFX_OF=ON `
@@ -55,6 +57,10 @@ jobs:
           cmake --build deps/fidelityfx1/sdk/build --config Release --target ffx_opticalflow_x64 ffx_backend_dx12_x64 --parallel 4
           if (-not (Test-Path 'deps/fidelityfx1/sdk/bin/ffx_sdk/ffx_opticalflow_x64.lib') -or -not (Test-Path 'deps/fidelityfx1/sdk/bin/ffx_sdk/ffx_backend_dx12_x64.lib')) {
             throw 'FidelityFX 1.1.4 opticalflow static libs were not produced!'
+          }
+          $libText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes('deps/fidelityfx1/sdk/bin/ffx_sdk/ffx_opticalflow_x64.lib'))
+          if ($libText -notmatch 'MT_StaticRelease') {
+            throw 'ffx_opticalflow_x64.lib was not built with /MT (MT_StaticRelease)!'
           }
           Get-Item 'deps/fidelityfx1/sdk/bin/ffx_sdk/*.lib' | Select-Object Name, Length
 

@@ -226,6 +226,7 @@ struct SharedNgxCore {
     HMODULE module = nullptr;
     ID3D12Device* device = nullptr;
     bool initialized = false;
+    bool keepAlive = true; // Never FreeLibrary/Shutdown NGX cores with D3D12 hooks or async builders mid-process.
     GetCapsParamsFn getCaps = nullptr;
     GetCapsParamsFn allocParams = nullptr;
     DestroyParamsFn destroyParams = nullptr;
@@ -236,18 +237,21 @@ struct SharedNgxCore {
     ShutdownFn shutdown0 = nullptr;
 
     ~SharedNgxCore() {
-        if (initialized && (shutdown1 || shutdown0)) {
+        if (!keepAlive && initialized && (shutdown1 || shutdown0)) {
             unsigned seh = 0;
             const uint32_t res = safeShutdown(shutdown1, shutdown0, device, seh);
             log::info("amd-nr-ngx", std::format("Shutdown last device owner result=0x{:X} seh=0x{:X}", res, seh));
         }
-        if (module) FreeLibrary(module);
+        // Intentionally never FreeLibrary(module): dlssnr_core.dll / neuralhub_host.dll
+        // install D3D12 vtable hooks and background builder threads whose teardown while
+        // the process is live causes 0xC0000005 / deadlocks on backend switch.
         if (device) device->Release();
     }
 };
 
 std::mutex g_coreMutex;
-std::map<std::pair<ID3D12Device*, std::wstring>, std::weak_ptr<SharedNgxCore>> g_cores;
+std::map<std::wstring, HMODULE> g_pinnedModules;
+std::map<std::pair<ID3D12Device*, std::wstring>, std::shared_ptr<SharedNgxCore>> g_cores;
 
 void barrier(ID3D12GraphicsCommandList* list, ID3D12Resource* resource,
              D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
@@ -605,18 +609,24 @@ bool AmdNgxNrBackend::openInternal(const std::filesystem::path& dllPath,
     // Acquire or initialize the device-scoped NGX core module.
     {
         std::lock_guard lock(g_coreMutex);
-        for (auto it = g_cores.begin(); it != g_cores.end();) {
-            if (it->second.expired()) it = g_cores.erase(it);
-            else ++it;
-        }
         const auto key = std::make_pair(device, normalizedDll.wstring());
-        s.core = g_cores[key].lock();
+        const auto found = g_cores.find(key);
+        if (found != g_cores.end() && found->second) {
+            s.core = found->second;
+        }
         if (!s.core) {
             auto core = std::make_shared<SharedNgxCore>();
-            core->module = LoadLibraryExW(normalizedDll.c_str(), nullptr,
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-            if (!core->module) {
-                return s.fail(std::format("{} load failed win32={}", normalizedDll.filename().string(), GetLastError()));
+            core->keepAlive = useParityShaders;
+            auto modIt = g_pinnedModules.find(normalizedDll.wstring());
+            if (modIt != g_pinnedModules.end() && modIt->second) {
+                core->module = modIt->second;
+            } else {
+                core->module = LoadLibraryExW(normalizedDll.c_str(), nullptr,
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+                if (!core->module) {
+                    return s.fail(std::format("{} load failed win32={}", normalizedDll.filename().string(), GetLastError()));
+                }
+                g_pinnedModules[normalizedDll.wstring()] = core->module;
             }
             const auto initExt = reinterpret_cast<InitExtFn>(GetProcAddress(core->module, "NVSDK_NGX_D3D12_Init_Ext"));
             const auto initBasic = reinterpret_cast<InitFn>(GetProcAddress(core->module, "NVSDK_NGX_D3D12_Init"));
@@ -642,7 +652,9 @@ bool AmdNgxNrBackend::openInternal(const std::filesystem::path& dllPath,
             core->device = device;
             device->AddRef();
             s.core = core;
-            g_cores[key] = core;
+            if (core->keepAlive) {
+                g_cores[key] = core;
+            }
         }
     }
 
